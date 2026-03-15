@@ -194,10 +194,21 @@ Single Python process. Three async tasks:
 - `writer_task()` -- single writer, no file races
 
 Key behaviors:
-- Deduplication: skips unchanged top-of-book
+- **Buffered dedup**: a row is written only when bid or ask price changes, and contains the final sizes observed at the previous price level (see below)
 - Auto-reconnect with exponential backoff (3s to 30s)
 - UTC date rollover for file rotation
 - Graceful shutdown on SIGINT/SIGTERM (drains queue, flushes files)
+
+### How buffered dedup works
+
+Exchanges send many updates per millisecond. Most of them change only the order size, not the price. Writing every size change would produce massive files with little value for backtesting.
+
+Instead, each stream keeps a one-tick buffer in memory:
+
+1. A tick arrives with the same bid/ask as before -- the buffer is updated (RAM only, no I/O)
+2. A tick arrives with a new bid or ask price -- the **buffered tick is flushed** to the writer (one file write), then the new tick becomes the buffer
+
+This means each CSV row represents a **settled price level** with the **final liquidity** (bid_size/ask_size) that was available at that price before it moved. This is more useful for backtesting than the first (transient) sizes that appear when a price level is initially set.
 
 ## Chaos testing
 

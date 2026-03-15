@@ -6,10 +6,7 @@ Built for backtesting: captures real spreads, realistic market order execution, 
 
 ## What it collects
 
-| Exchange | Symbols |
-|---|---|
-| Binance USDM Futures | BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT, DOGEUSDT, BNBUSDT |
-| Bybit Linear | BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT, DOGEUSDT |
+Top-of-book quotes for any USDT perpetual futures pairs on Binance and Bybit. Symbols are configured via `BINANCE_SYMBOLS` and `BYBIT_SYMBOLS` in `.env`.
 
 Each row: `ts,bid,ask,bid_size,ask_size` -- prices stored as strings (no float rounding).
 
@@ -86,9 +83,9 @@ All variables are required.
 ### 1. Install
 
 ```bash
-sudo mkdir -p /opt/tick-collector
-sudo cp -r . /opt/tick-collector/
-cd /opt/tick-collector
+sudo mkdir -p /home/user/GitHub/tick-collector
+sudo cp -r . /home/user/GitHub/tick-collector/
+cd /home/user/GitHub/tick-collector
 sudo python3 -m venv venv
 sudo ./venv/bin/pip install -r requirements.txt
 sudo cp .env.example .env
@@ -106,9 +103,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/tick-collector
-EnvironmentFile=/opt/tick-collector/.env
-ExecStart=/opt/tick-collector/venv/bin/python3 collector.py
+WorkingDirectory=/home/user/GitHub/tick-collector
+EnvironmentFile=/home/user/GitHub/tick-collector/.env
+ExecStart=/home/user/GitHub/tick-collector/venv/bin/python3 collector.py
 Restart=always
 RestartSec=5
 KillSignal=SIGINT
@@ -146,9 +143,9 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/opt/tick-collector
-EnvironmentFile=/opt/tick-collector/.env
-ExecStart=/opt/tick-collector/venv/bin/python3 maintain.py
+WorkingDirectory=/home/user/GitHub/tick-collector
+EnvironmentFile=/home/user/GitHub/tick-collector/.env
+ExecStart=/home/user/GitHub/tick-collector/venv/bin/python3 maintain.py
 EOF
 
 sudo tee /etc/systemd/system/tick-maintain.timer << 'EOF'

@@ -103,6 +103,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=user
+Group=user
 WorkingDirectory=/home/user/GitHub/tick-collector
 EnvironmentFile=/home/user/GitHub/tick-collector/.env
 ExecStart=/home/user/GitHub/tick-collector/venv/bin/python3 collector.py
@@ -143,6 +145,8 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+User=user
+Group=user
 WorkingDirectory=/home/user/GitHub/tick-collector
 EnvironmentFile=/home/user/GitHub/tick-collector/.env
 ExecStart=/home/user/GitHub/tick-collector/venv/bin/python3 maintain.py

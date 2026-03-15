@@ -64,6 +64,7 @@ async def stream(
             async with websockets.connect(url, **connect_kwargs) as ws:
                 backoff = 3
                 log.info("[binance] connected")
+                buf: dict[tuple, dict] = {}
 
                 async for raw in ws:
                     tick = _parse(raw)
@@ -73,12 +74,19 @@ async def stream(
 
                     key = (EXCHANGE, tick["symbol"])
                     price = (tick["bid"], tick["ask"])
+                    last_msg_mono[key] = time.monotonic()
 
                     if last_state.get(key) == price:
+                        buf[key] = tick
                         continue
 
+                    if key in buf:
+                        await queue.put(buf[key])
+
                     last_state[key] = price
-                    last_msg_mono[key] = time.monotonic()
+                    buf[key] = tick
+
+                for tick in buf.values():
                     await queue.put(tick)
         except (websockets.ConnectionClosed, ConnectionError, TimeoutError, OSError) as e:
             reconnect_count[EXCHANGE] = reconnect_count.get(EXCHANGE, 0) + 1

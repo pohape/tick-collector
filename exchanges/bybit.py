@@ -101,6 +101,7 @@ async def stream(queue: asyncio.Queue, last_state: dict, last_msg_mono: dict, re
             async with websockets.connect(url, **connect_kwargs) as ws:
                 backoff = 3
                 bybit = BybitState()
+                buf: dict[tuple, dict] = {}
 
                 await ws.send(_subscribe_msg(settings.BYBIT_SYMBOLS))
                 log.info("[bybit] connected, subscribed to %d symbols", len(settings.BYBIT_SYMBOLS))
@@ -110,7 +111,6 @@ async def stream(queue: asyncio.Queue, last_state: dict, last_msg_mono: dict, re
                 try:
                     async for raw in ws:
                         msg = json.loads(raw)
-                        # skip subscribe responses and pong
 
                         if "op" in msg:
                             continue
@@ -122,13 +122,19 @@ async def stream(queue: asyncio.Queue, last_state: dict, last_msg_mono: dict, re
 
                         key = (EXCHANGE, tick["symbol"])
                         price = (tick["bid"], tick["ask"])
-
-                        if last_state.get(key) == price:
-                            continue
-
-                        last_state[key] = price
                         last_msg_mono[key] = time.monotonic()
 
+                        if last_state.get(key) == price:
+                            buf[key] = tick
+                            continue
+
+                        if key in buf:
+                            await queue.put(buf[key])
+
+                        last_state[key] = price
+                        buf[key] = tick
+
+                    for tick in buf.values():
                         await queue.put(tick)
                 finally:
                     ping_task.cancel()

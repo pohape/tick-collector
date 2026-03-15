@@ -30,3 +30,9 @@ FLUSH_EVERY = int(os.getenv("FLUSH_EVERY", "500"))
 
 # Gap warning threshold in seconds
 GAP_WARN_SECONDS = float(os.getenv("GAP_WARN_SECONDS", "10"))
+
+# Maintenance
+RETENTION_DAYS = int(_require("RETENTION_DAYS"))
+MAIL_USER = _require("MAIL_USER")
+MAIL_APP_PASSWORD = _require("MAIL_APP_PASSWORD")
+MAIL_WEBDAV_URL = _require("MAIL_WEBDAV_URL")

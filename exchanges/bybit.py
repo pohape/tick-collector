@@ -121,12 +121,12 @@ async def stream(queue: asyncio.Queue, last_state: dict, last_msg_mono: dict, re
                             continue
 
                         key = (EXCHANGE, tick["symbol"])
-                        state = (tick["bid"], tick["bid_size"], tick["ask"], tick["ask_size"])
+                        price = (tick["bid"], tick["ask"])
 
-                        if last_state.get(key) == state:
+                        if last_state.get(key) == price:
                             continue
 
-                        last_state[key] = state
+                        last_state[key] = price
                         last_msg_mono[key] = time.monotonic()
 
                         await queue.put(tick)

@@ -36,3 +36,8 @@ LOCAL_STORAGE_MB = int(_require("LOCAL_STORAGE_MB"))
 WEBDAV_USER = _require("WEBDAV_USER")
 WEBDAV_PASSWORD = _require("WEBDAV_PASSWORD")
 WEBDAV_URL = _require("WEBDAV_URL")
+
+# Optional second WebDAV for redundant backup
+WEBDAV2_USER = os.getenv("WEBDAV2_USER", "").strip() or None
+WEBDAV2_PASSWORD = os.getenv("WEBDAV2_PASSWORD", "").strip() or None
+WEBDAV2_URL = os.getenv("WEBDAV2_URL", "").strip() or None

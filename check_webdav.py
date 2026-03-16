@@ -1,6 +1,8 @@
 """Verify WebDAV credentials and connectivity."""
 
 import sys
+import tempfile
+from pathlib import Path
 
 import requests
 
@@ -22,38 +24,32 @@ def _fail(msg: str) -> None:
     print(f"  {CROSS} {msg}")
 
 
-def main() -> int:
-    print(f"\nWebDAV: {settings.WEBDAV_URL}")
-    print(f"User:   {settings.WEBDAV_USER}\n")
+def _check_one(label: str, url: str, user: str, password: str) -> bool:
+    print(f"\n[{label}] {url}")
+    print(f"  User: {user}\n")
 
-    dav = WebDAVClient(settings.WEBDAV_URL, settings.WEBDAV_USER, settings.WEBDAV_PASSWORD)
+    dav = WebDAVClient(url, user, password)
 
-    # 1. Connect and check quota
     avail, used = dav.quota()
     if avail is None:
         _fail("Connection failed")
-        return 1
+        return False
     _ok("Connected")
 
     total = avail + (used or 0)
     _ok(f"Free space: {avail / (1024 * 1024):.0f} / {total / (1024 * 1024):.0f} MB")
 
-    # 2. Create test directory
     test_dir = "_tick_collector_test"
     try:
         dav.ensure_dir(test_dir)
         exists, _ = dav.exists(test_dir)
         if not exists:
             _fail(f"Create directory '{test_dir}'")
-            return 1
+            return False
         _ok(f"Created directory '{test_dir}'")
     except requests.RequestException as e:
         _fail(f"Create directory: {e}")
-        return 1
-
-    # 3. Upload test file
-    import tempfile
-    from pathlib import Path
+        return False
 
     test_remote = f"{test_dir}/test.txt"
     tmp = Path(tempfile.mktemp())
@@ -61,35 +57,66 @@ def main() -> int:
     try:
         if not dav.upload(tmp, test_remote):
             _fail("Upload test file")
-            return 1
+            return False
         exists, size = dav.exists(test_remote)
         if not exists:
             _fail("Upload verification")
-            return 1
+            return False
         _ok(f"Uploaded test file ({size} bytes)")
     except requests.RequestException as e:
         _fail(f"Upload: {e}")
-        return 1
+        return False
     finally:
         tmp.unlink(missing_ok=True)
 
-    # 4. Delete test file
     if dav.delete(test_remote):
         _ok("Deleted test file")
     else:
         _fail("Delete test file")
-        return 1
+        return False
 
-    # 5. Delete test directory
     if dav.delete(test_dir):
         _ok("Deleted test directory")
     else:
         _fail("Delete test directory")
-        return 1
+        return False
 
-    print(f"\n  {CHECK} All checks passed\n")
-    return 0
+    _ok("All checks passed")
+    return True
+
+
+def _free_mb(url: str, user: str, password: str) -> int:
+    dav = WebDAVClient(url, user, password)
+    avail, _ = dav.quota()
+    if avail is None:
+        print("error: connection failed", file=sys.stderr)
+        sys.exit(1)
+    return int(avail / (1024 * 1024))
+
+
+def _has_secondary() -> bool:
+    return bool(settings.WEBDAV2_URL and settings.WEBDAV2_USER and settings.WEBDAV2_PASSWORD)
+
+
+def main() -> int:
+    ok1 = _check_one("primary", settings.WEBDAV_URL, settings.WEBDAV_USER, settings.WEBDAV_PASSWORD)
+
+    ok2 = True
+    if _has_secondary():
+        ok2 = _check_one("secondary", settings.WEBDAV2_URL, settings.WEBDAV2_USER, settings.WEBDAV2_PASSWORD)
+    print()
+
+    return 0 if (ok1 and ok2) else 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    if "--free-mb-only" in sys.argv:
+        print(_free_mb(settings.WEBDAV_URL, settings.WEBDAV_USER, settings.WEBDAV_PASSWORD))
+    elif "--free-mb-only2" in sys.argv:
+        if not _has_secondary():
+            print("error: secondary WebDAV not configured (WEBDAV2_URL, WEBDAV2_USER, WEBDAV2_PASSWORD)",
+                  file=sys.stderr)
+            sys.exit(1)
+        print(_free_mb(settings.WEBDAV2_URL, settings.WEBDAV2_USER, settings.WEBDAV2_PASSWORD))
+    else:
+        sys.exit(main())

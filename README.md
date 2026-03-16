@@ -67,8 +67,11 @@ WEBDAV_URL=https://webdav.cloud.mail.ru  # or https://webdav.yandex.ru
 | `WEBDAV_USER` | WebDAV account username |
 | `WEBDAV_PASSWORD` | WebDAV app password |
 | `WEBDAV_URL` | WebDAV endpoint URL |
+| `WEBDAV2_USER` | Secondary WebDAV username (optional) |
+| `WEBDAV2_PASSWORD` | Secondary WebDAV password (optional) |
+| `WEBDAV2_URL` | Secondary WebDAV URL (optional) |
 
-All variables are required.
+All variables are required except `WEBDAV2_*` which enable redundant backup.
 
 ## Data volume
 
@@ -122,13 +125,34 @@ At ~6.5 GB/year both free tiers are sufficient for over a year of data.
 
 **Google Drive** does not support WebDAV and cannot be used.
 
-To verify your WebDAV credentials before deploying:
+### Redundant backup (optional)
+
+To store data in two clouds simultaneously, add a secondary WebDAV in `.env`:
+
+```
+WEBDAV2_USER=your@yandex.ru
+WEBDAV2_PASSWORD=your_app_password
+WEBDAV2_URL=https://webdav.yandex.ru
+```
+
+When configured, maintenance uploads to both clouds. Local files are only deleted after confirming presence in **both** clouds.
+
+### Verify WebDAV
 
 ```bash
 ./venv/bin/python3 check_webdav.py
 ```
 
-This will test the connection, check free space, create and delete a test file, and report results.
+This will test connectivity, check free space, create and delete a test file for each configured WebDAV (primary and secondary if set).
+
+For monitoring scripts, get free space as a plain number (MB):
+
+```bash
+./venv/bin/python3 check_webdav.py --free-mb-only
+# 8186
+./venv/bin/python3 check_webdav.py --free-mb-only2
+# 9500
+```
 
 ## Deploy as a systemd service
 

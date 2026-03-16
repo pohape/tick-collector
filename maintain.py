@@ -1,4 +1,4 @@
-"""Nightly maintenance: compress closed CSVs, upload to Mail.ru Cloud, clean old files."""
+"""Nightly maintenance: compress closed CSVs, upload to WebDAV cloud(s), clean old files."""
 
 import logging
 import re
@@ -190,6 +190,10 @@ def main() -> int:
     )
 
     dav = WebDAVClient(settings.WEBDAV_URL, settings.WEBDAV_USER, settings.WEBDAV_PASSWORD)
+    dav2 = None
+    if settings.WEBDAV2_URL and settings.WEBDAV2_USER and settings.WEBDAV2_PASSWORD:
+        dav2 = WebDAVClient(settings.WEBDAV2_URL, settings.WEBDAV2_USER, settings.WEBDAV2_PASSWORD)
+        log.info("secondary WebDAV enabled: %s", settings.WEBDAV2_URL)
     n_compressed = n_uploaded = n_deleted = n_errors = 0
 
     # Phase 1: COMPRESS
@@ -218,33 +222,33 @@ def main() -> int:
     # Phase 2: UPLOAD
     log.info("phase 2: upload")
 
+    all_davs = [("primary", dav)]
+    if dav2:
+        all_davs.append(("secondary", dav2))
+
     for zst_path in sorted(settings.DATA_DIR.rglob("*.csv.zst")):
         remote = _remote_path(zst_path)
         local_size = zst_path.stat().st_size
-        exists, remote_size = dav.exists(remote)
 
-        if exists and remote_size == local_size:
-            log.debug("already uploaded: %s", remote)
+        for label, d in all_davs:
+            exists, remote_size = d.exists(remote)
 
-            continue
-        elif dav.upload(zst_path, remote):
-            ok, verified_size = dav.exists(remote)
+            if exists and remote_size == local_size:
+                log.debug("already uploaded (%s): %s", label, remote)
+                continue
+            elif d.upload(zst_path, remote):
+                ok, verified_size = d.exists(remote)
 
-            if ok and verified_size == local_size:
-                log.info("uploaded %s (%d bytes)", remote, local_size)
-                n_uploaded += 1
+                if ok and verified_size == local_size:
+                    log.info("uploaded (%s) %s (%d bytes)", label, remote, local_size)
+                    n_uploaded += 1
+                else:
+                    log.error("upload verification failed (%s): %s (local=%d, remote=%s)",
+                              label, remote, local_size, verified_size)
+                    n_errors += 1
             else:
-                log.error(
-                    "upload verification failed: %s (local=%d, remote=%s)",
-                    remote,
-                    local_size,
-                    verified_size
-                )
-
+                log.error("upload failed (%s): %s", label, remote)
                 n_errors += 1
-        else:
-            log.error("upload failed: %s", remote)
-            n_errors += 1
 
     # Phase 3: CLEANUP (delete oldest .zst files until total size fits within limit)
     zst_files = sorted(settings.DATA_DIR.rglob("*.csv.zst"))
@@ -267,18 +271,23 @@ def main() -> int:
             break
 
         remote = _remote_path(zst_path)
-        exists, _ = dav.exists(remote)
+        confirmed_all = True
+        for label, d in all_davs:
+            exists, _ = d.exists(remote)
+            if not exists:
+                log.warning("skipping delete, not in %s cloud: %s", label, zst_path)
+                confirmed_all = False
 
-        if not exists:
-            log.warning("skipping delete, not in cloud: %s", zst_path)
+        if not confirmed_all:
             n_errors += 1
-
             continue
 
         file_size = zst_path.stat().st_size
         zst_path.unlink()
         total_size -= file_size
-        log.info("deleted local %s (date=%s, freed %d KB, confirmed in cloud)", zst_path, file_date, file_size // 1024)
+        clouds = "+".join(label for label, _ in all_davs)
+        log.info("deleted local %s (date=%s, freed %d KB, confirmed in %s)",
+                 zst_path, file_date, file_size // 1024, clouds)
         n_deleted += 1
 
     # remove empty dirs
@@ -296,26 +305,22 @@ def main() -> int:
     )
 
     # Cloud quota report
-    avail, used = dav.quota()
+    up_bytes = sum(f.stat().st_size for f in settings.DATA_DIR.rglob("*.csv.zst")
+                   if extract_date(f.name) == today)
 
-    if avail is not None and used is not None:
-        avail_mb = avail / (1024 * 1024)
-        used_mb = used / (1024 * 1024)
-        total_mb = avail_mb + used_mb
-        # estimate daily usage from today's uploaded bytes
-        up_bytes = sum(f.stat().st_size for f in settings.DATA_DIR.rglob("*.csv.zst") if extract_date(f.name) == today)
-
-        if up_bytes > 0:
-            days_left = avail / up_bytes
-            log.info(
-                "cloud: %.0f/%.0f MB used, %.0f MB free (~%d days remaining)",
-                used_mb,
-                total_mb,
-                avail_mb,
-                int(days_left)
-            )
-        else:
-            log.info("cloud: %.0f/%.0f MB used, %.0f MB free", used_mb, total_mb, avail_mb)
+    for label, d in all_davs:
+        avail, used = d.quota()
+        if avail is not None and used is not None:
+            avail_mb = avail / (1024 * 1024)
+            used_mb = used / (1024 * 1024)
+            total_mb = avail_mb + used_mb
+            if up_bytes > 0:
+                days_left = avail / up_bytes
+                log.info("cloud (%s): %.0f/%.0f MB used, %.0f MB free (~%d days remaining)",
+                         label, used_mb, total_mb, avail_mb, int(days_left))
+            else:
+                log.info("cloud (%s): %.0f/%.0f MB used, %.0f MB free",
+                         label, used_mb, total_mb, avail_mb)
 
     return 1 if n_errors else 0
 

@@ -99,7 +99,11 @@ def _check_one(label: str, url: str, user: str, password: str) -> bool:
         for symbol in symbols:
             expected.append(f"{CLOUD_ROOT}/{exchange}/{symbol}/{yesterday}.csv.zst")
 
-    missing = [r for r in expected if not dav.exists(r)[0]]
+    def _missing(r):
+        exists, size = dav.exists(r)
+        return not exists or not size or size < 1024
+
+    missing = [r for r in expected if _missing(r)]
 
     if not missing:
         _ok(f"Synced: all {len(expected)} files for {yesterday}")
@@ -134,9 +138,9 @@ def _is_synced(url: str, user: str, password: str) -> bool:
 
     for symbols, exchange in [(settings.BINANCE_SYMBOLS, "binance"), (settings.BYBIT_SYMBOLS, "bybit")]:
         for symbol in symbols:
-            exists, _ = dav.exists(f"{CLOUD_ROOT}/{exchange}/{symbol}/{yesterday}.csv.zst")
+            exists, size = dav.exists(f"{CLOUD_ROOT}/{exchange}/{symbol}/{yesterday}.csv.zst")
 
-            if not exists:
+            if not exists or not size or size < 1024:
                 return False
     return True
 

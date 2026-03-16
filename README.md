@@ -154,6 +154,17 @@ For monitoring scripts, get free space as a plain number (MB):
 # 9500
 ```
 
+Check if yesterday's data is fully synced (returns `True` or `False`):
+
+```bash
+./venv/bin/python3 check_webdav.py --synced
+# True
+./venv/bin/python3 check_webdav.py --synced2
+# True
+```
+
+These machine-readable options are designed for automated monitoring and alerting.
+
 ## Deploy as a systemd service
 
 ### 1. Install

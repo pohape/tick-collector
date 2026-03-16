@@ -84,7 +84,11 @@ Raw CSV files are compressed and deleted daily by `maintain.py`, so only one day
 
 ## Nightly maintenance
 
-`maintain.py` compresses closed CSV files (zstd level 19, ~5x ratio), uploads them to any WebDAV-compatible cloud, and deletes the oldest local files when total compressed size exceeds `LOCAL_STORAGE_MB`.
+Maintenance runs automatically at 00:01 UTC as part of the collector process. It compresses closed CSV files (zstd level 19, ~5x ratio), uploads them to a WebDAV cloud, and deletes the oldest local files when total compressed size exceeds `LOCAL_STORAGE_MB`.
+
+No separate cron job or systemd timer needed.
+
+To run maintenance manually (e.g., on first deploy):
 
 ```bash
 ./venv/bin/python3 maintain.py
@@ -172,53 +176,6 @@ sudo systemctl status tick-collector
 ```bash
 sudo journalctl -u tick-collector -f
 ```
-
-## Schedule nightly maintenance
-
-Create a systemd timer to run `maintain.py` at 00:01 UTC every day. Unlike cron, systemd timers support UTC natively.
-
-```bash
-sudo tee /etc/systemd/system/tick-maintain.service << 'EOF'
-[Unit]
-Description=Tick Collector Maintenance
-After=network-online.target
-
-[Service]
-Type=oneshot
-User=user
-Group=user
-WorkingDirectory=/home/user/GitHub/tick-collector
-EnvironmentFile=/home/user/GitHub/tick-collector/.env
-ExecStart=/home/user/GitHub/tick-collector/venv/bin/python3 maintain.py
-EOF
-
-sudo tee /etc/systemd/system/tick-maintain.timer << 'EOF'
-[Unit]
-Description=Run tick maintenance daily at 00:01 UTC
-
-[Timer]
-OnCalendar=*-*-* 00:01:00 UTC
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now tick-maintain.timer
-```
-
-Check status:
-
-```bash
-sudo systemctl list-timers tick-maintain.timer
-sudo journalctl -u tick-maintain -f
-```
-
-This will:
-- Compress all closed CSV files from previous days (zstd level 19)
-- Upload compressed files to Mail.ru Cloud
-- Delete oldest local files when total size exceeds `LOCAL_STORAGE_MB`
 
 ## Architecture
 

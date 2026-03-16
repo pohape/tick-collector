@@ -50,10 +50,10 @@ BINANCE_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,BNBUSDT
 BYBIT_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT
 LOG_LEVEL=INFO
 WS_TEST_MODE=false
-RETENTION_DAYS=10
-MAIL_USER=your@mail.ru
-MAIL_APP_PASSWORD=your_app_password
-MAIL_WEBDAV_URL=https://webdav.cloud.mail.ru
+LOCAL_STORAGE_MB=1024
+WEBDAV_USER=your_account
+WEBDAV_PASSWORD=your_app_password
+WEBDAV_URL=https://webdav.cloud.mail.ru  # or https://webdav.yandex.ru
 ```
 
 | Variable | Description |
@@ -63,20 +63,60 @@ MAIL_WEBDAV_URL=https://webdav.cloud.mail.ru
 | `BYBIT_SYMBOLS` | Comma-separated Bybit symbols |
 | `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING) |
 | `WS_TEST_MODE` | Disable TLS verification for toxiproxy testing |
-| `RETENTION_DAYS` | Days to keep compressed files locally |
-| `MAIL_USER` | Mail.ru Cloud email |
-| `MAIL_APP_PASSWORD` | Mail.ru Cloud app password |
-| `MAIL_WEBDAV_URL` | Mail.ru Cloud WebDAV endpoint |
+| `LOCAL_STORAGE_MB` | Max MB of compressed files to keep locally |
+| `WEBDAV_USER` | WebDAV account username |
+| `WEBDAV_PASSWORD` | WebDAV app password |
+| `WEBDAV_URL` | WebDAV endpoint URL |
 
 All variables are required.
 
+## Data volume
+
+With the default 11 symbols (6 Binance + 5 Bybit):
+
+| Period | Raw CSV | Compressed (.zst) |
+|---|---|---|
+| Day | ~95 MB | ~18 MB |
+| Month | -- | ~550 MB |
+| Year | -- | ~6.5 GB |
+
+Raw CSV files are compressed and deleted daily by `maintain.py`, so only one day of uncompressed data exists at any time.
+
 ## Nightly maintenance
 
-`maintain.py` compresses closed CSV files (zstd, ~12x ratio), uploads them to Mail.ru Cloud, and deletes local files older than `RETENTION_DAYS`.
+`maintain.py` compresses closed CSV files (zstd level 19, ~5x ratio), uploads them to any WebDAV-compatible cloud, and deletes the oldest local files when total compressed size exceeds `LOCAL_STORAGE_MB`.
 
 ```bash
 ./venv/bin/python3 maintain.py
 ```
+
+### Cloud storage
+
+Any WebDAV-compatible storage will work. Configure via `WEBDAV_USER`, `WEBDAV_PASSWORD`, and `WEBDAV_URL` in `.env`.
+
+**Mail.ru Cloud** (8 GB free):
+
+```
+WEBDAV_USER=your@mail.ru
+WEBDAV_PASSWORD=your_app_password
+WEBDAV_URL=https://webdav.cloud.mail.ru
+```
+
+Generate an app password at Mail.ru: Settings > Security > App passwords.
+
+**Yandex.Disk** (10 GB free):
+
+```
+WEBDAV_USER=your@yandex.ru
+WEBDAV_PASSWORD=your_app_password
+WEBDAV_URL=https://webdav.yandex.ru
+```
+
+Generate an app password at Yandex: ID > Security > App passwords.
+
+At ~6.5 GB/year both free tiers are sufficient for over a year of data.
+
+**Google Drive** does not support WebDAV and cannot be used.
 
 ## Deploy as a systemd service
 
@@ -178,7 +218,7 @@ sudo journalctl -u tick-maintain -f
 This will:
 - Compress all closed CSV files from previous days (zstd level 19)
 - Upload compressed files to Mail.ru Cloud
-- Delete local files older than `RETENTION_DAYS`
+- Delete oldest local files when total size exceeds `LOCAL_STORAGE_MB`
 
 ## Architecture
 

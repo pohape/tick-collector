@@ -5,7 +5,7 @@ import re
 import sys
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -76,6 +76,37 @@ class WebDAVClient:
             return True, size
         except ET.ParseError:
             return True, None
+
+    def quota(self) -> tuple[int | None, int | None]:
+        """Return (available_bytes, used_bytes) or (None, None) on error."""
+        body = ('<?xml version="1.0"?>'
+                '<d:propfind xmlns:d="DAV:"><d:prop>'
+                '<d:quota-available-bytes/><d:quota-used-bytes/>'
+                '</d:prop></d:propfind>')
+        try:
+            resp = self._session.request(
+                "PROPFIND", self._base_url + "/",
+                headers={"Depth": "0", "Content-Type": "application/xml"},
+                data=body,
+            )
+            
+            if resp.status_code not in (207, 200):
+                return None, None
+
+            root = ET.fromstring(resp.text)
+            ns = {"d": "DAV:"}
+            avail_el = root.find(".//d:quota-available-bytes", ns)
+            used_el = root.find(".//d:quota-used-bytes", ns)
+            avail = int(avail_el.text) if avail_el is not None and avail_el.text else None
+            used = int(used_el.text) if used_el is not None and used_el.text else None
+
+            return avail, used
+        except (requests.RequestException, ET.ParseError):
+            return None, None
+
+    def delete(self, remote_path: str) -> bool:
+        resp = self._session.request("DELETE", self._url(remote_path))
+        return resp.status_code in (200, 204, 404)
 
     def upload(self, local_path: Path, remote_path: str) -> bool:
         parent = "/".join(remote_path.strip("/").split("/")[:-1])
@@ -150,17 +181,15 @@ def main() -> int:
     )
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.RETENTION_DAYS)
-    cutoff_str = cutoff.strftime("%Y-%m-%d")
+    limit_bytes = settings.LOCAL_STORAGE_MB * 1024 * 1024
 
     log.info(
-        "starting maintenance (today=%s, retention=%dd, cutoff=%s)",
+        "starting maintenance (today=%s, local_storage_limit=%d MB)",
         today,
-        settings.RETENTION_DAYS,
-        cutoff_str
+        settings.LOCAL_STORAGE_MB,
     )
 
-    dav = WebDAVClient(settings.MAIL_WEBDAV_URL, settings.MAIL_USER, settings.MAIL_APP_PASSWORD)
+    dav = WebDAVClient(settings.WEBDAV_URL, settings.WEBDAV_USER, settings.WEBDAV_PASSWORD)
     n_compressed = n_uploaded = n_deleted = n_errors = 0
 
     # Phase 1: COMPRESS
@@ -217,14 +246,25 @@ def main() -> int:
             log.error("upload failed: %s", remote)
             n_errors += 1
 
-    # Phase 3: CLEANUP
-    log.info("phase 3: cleanup (cutoff=%s)", cutoff_str)
+    # Phase 3: CLEANUP (delete oldest .zst files until total size fits within limit)
+    zst_files = sorted(settings.DATA_DIR.rglob("*.csv.zst"))
+    total_size = sum(f.stat().st_size for f in zst_files)
+    log.info("phase 3: cleanup (total=%d MB, limit=%d MB)", total_size // (1024 * 1024), settings.LOCAL_STORAGE_MB)
 
-    for zst_path in sorted(settings.DATA_DIR.rglob("*.csv.zst")):
-        file_date = extract_date(zst_path.name)
+    # sort oldest first (by date in filename)
+    zst_by_date = []
 
-        if file_date is None or file_date >= cutoff_str:
-            continue
+    for f in zst_files:
+        d = extract_date(f.name)
+
+        if d:
+            zst_by_date.append((d, f))
+
+    zst_by_date.sort()
+
+    for file_date, zst_path in zst_by_date:
+        if total_size <= limit_bytes:
+            break
 
         remote = _remote_path(zst_path)
         exists, _ = dav.exists(remote)
@@ -235,8 +275,10 @@ def main() -> int:
 
             continue
 
+        file_size = zst_path.stat().st_size
         zst_path.unlink()
-        log.info("deleted local %s (date=%s, confirmed in cloud)", zst_path, file_date)
+        total_size -= file_size
+        log.info("deleted local %s (date=%s, freed %d KB, confirmed in cloud)", zst_path, file_date, file_size // 1024)
         n_deleted += 1
 
     # remove empty dirs
@@ -250,8 +292,30 @@ def main() -> int:
         n_compressed,
         n_uploaded,
         n_deleted,
-        n_errors
+        n_errors,
     )
+
+    # Cloud quota report
+    avail, used = dav.quota()
+
+    if avail is not None and used is not None:
+        avail_mb = avail / (1024 * 1024)
+        used_mb = used / (1024 * 1024)
+        total_mb = avail_mb + used_mb
+        # estimate daily usage from today's uploaded bytes
+        up_bytes = sum(f.stat().st_size for f in settings.DATA_DIR.rglob("*.csv.zst") if extract_date(f.name) == today)
+
+        if up_bytes > 0:
+            days_left = avail / up_bytes
+            log.info(
+                "cloud: %.0f/%.0f MB used, %.0f MB free (~%d days remaining)",
+                used_mb,
+                total_mb,
+                avail_mb,
+                int(days_left)
+            )
+        else:
+            log.info("cloud: %.0f/%.0f MB used, %.0f MB free", used_mb, total_mb, avail_mb)
 
     return 1 if n_errors else 0
 

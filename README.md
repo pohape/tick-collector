@@ -42,7 +42,7 @@ cp .env.example .env
 
 ## Configuration
 
-All settings are in `.env`:
+All settings are in `.env`. Restart the service after any change: `sudo systemctl restart tick-collector`.
 
 ```
 DATA_DIR=data

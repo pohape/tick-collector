@@ -122,6 +122,14 @@ At ~6.5 GB/year both free tiers are sufficient for over a year of data.
 
 **Google Drive** does not support WebDAV and cannot be used.
 
+To verify your WebDAV credentials before deploying:
+
+```bash
+./venv/bin/python3 check_webdav.py
+```
+
+This will test the connection, check free space, create and delete a test file, and report results.
+
 ## Deploy as a systemd service
 
 ### 1. Install

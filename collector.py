@@ -15,7 +15,10 @@ log = logging.getLogger("collector")
 
 
 async def _maintenance_loop() -> None:
-    """Run maintenance daily at 00:01 UTC."""
+    """Run maintenance daily at 00:01 UTC. Self-healing: exceptions
+    inside maintain.main() are logged and the loop continues to the
+    next day. Without this guard, a single crash would silently kill
+    the asyncio task and stop nightly compress/upload indefinitely."""
     while True:
         now = datetime.now(timezone.utc)
         tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=1, second=0, microsecond=0)
@@ -23,20 +26,43 @@ async def _maintenance_loop() -> None:
         log.info("next maintenance in %.0fs (at %s UTC)", wait, tomorrow.strftime("%Y-%m-%d %H:%M"))
         await asyncio.sleep(wait)
         log.info("starting maintenance")
-        exit_code = await asyncio.to_thread(maintain.main)
-        log.info("maintenance done (exit_code=%d)", exit_code)
+
+        try:
+            exit_code = await asyncio.to_thread(maintain.main)
+            log.info("maintenance done (exit_code=%d)", exit_code)
+        except Exception:
+            log.exception("maintenance crashed; will retry tomorrow")
 
 
 async def _gap_monitor(last_msg_mono: dict) -> None:
-    """Periodically warn when a symbol has no updates for too long."""
+    """Periodically warn when a symbol has no updates for too long.
+    Per-iteration try/except keeps the loop alive across unexpected
+    errors (same self-healing pattern as _maintenance_loop)."""
     threshold = settings.GAP_WARN_SECONDS
     while True:
         await asyncio.sleep(threshold)
-        now = time.monotonic()
-        for key, t in list(last_msg_mono.items()):
-            gap = now - t
-            if gap > threshold:
-                log.warning("gap: %s/%s no update for %.1fs", *key, gap)
+
+        try:
+            now = time.monotonic()
+            for key, t in list(last_msg_mono.items()):
+                gap = now - t
+                if gap > threshold:
+                    log.warning("gap: %s/%s no update for %.1fs", *key, gap)
+        except Exception:
+            log.exception("gap_monitor iteration failed")
+
+
+def _on_task_done(task: asyncio.Task) -> None:
+    """Done-callback that surfaces unhandled task exceptions to the log
+    immediately. Without it, an exception in a fire-and-forget task is
+    only reported by asyncio at GC time as 'Task exception was never
+    retrieved' — which is easy to miss when journald is rotating."""
+    if task.cancelled():
+        return
+
+    exc = task.exception()
+    if exc is not None:
+        log.error("task %s died with exception", task.get_name(), exc_info=exc)
 
 
 async def main() -> None:
@@ -77,6 +103,9 @@ async def main() -> None:
         asyncio.create_task(_gap_monitor(last_msg_mono), name="gap_monitor"),
         asyncio.create_task(_maintenance_loop(), name="maintenance"),
     ]
+
+    for t in tasks:
+        t.add_done_callback(_on_task_done)
 
     await shutdown_event.wait()
     log.info("shutting down: cancelling streams")

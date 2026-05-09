@@ -18,6 +18,11 @@ log = logging.getLogger("maintain")
 ZSTD_LEVEL = 19
 UPLOAD_TIMEOUT = 300
 UPLOAD_RETRIES = 3
+# Default timeout for metadata operations (PROPFIND, MKCOL, DELETE).
+# Without an explicit timeout, requests.Session.request hangs forever on
+# a stalled connection — that would freeze the asyncio maintenance task
+# and prevent subsequent days' runs.
+META_TIMEOUT = 30
 CLOUD_ROOT = "tick-data"
 DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\.csv(\.zst)?$")
 
@@ -38,6 +43,23 @@ class WebDAVClient:
     def _url(self, remote_path: str) -> str:
         return f"{self._base_url}/{remote_path}"
 
+    def _request(self, method: str, url: str, **kwargs) -> requests.Response | None:
+        """Wrapper around session.request that converts RequestException
+        (timeout, DNS error, connection reset, etc.) into a `None` return
+        so callers can degrade gracefully instead of crashing the whole
+        maintenance run. Without this guard, a single transient WebDAV
+        hiccup during phase 2 would propagate up through `maintain.main`
+        and silently kill the asyncio `_maintenance_loop` task in the
+        collector — exactly the failure mode that took the cloud backup
+        offline 2026-04-14 → 2026-05-09."""
+        kwargs.setdefault("timeout", META_TIMEOUT)
+        try:
+            return self._session.request(method, url, **kwargs)
+        except requests.RequestException as e:
+            log.warning("%s %s error: %s", method, url, e)
+
+            return None
+
     def ensure_dir(self, remote_path: str) -> None:
         parts = remote_path.strip("/").split("/")
 
@@ -47,20 +69,24 @@ class WebDAVClient:
             if d in self._created_dirs:
                 continue
 
-            resp = self._session.request("MKCOL", self._url(d))
+            resp = self._request("MKCOL", self._url(d))
 
-            if resp.status_code in (201, 405, 301):
+            if resp is None:
+                continue
+            elif resp.status_code in (201, 405, 301):
                 self._created_dirs.add(d)
             else:
                 log.warning("MKCOL %s -> %d %s", d, resp.status_code, resp.text[:200])
 
     def exists(self, remote_path: str) -> tuple[bool, int | None]:
-        resp = self._session.request(
+        resp = self._request(
             "PROPFIND", self._url(remote_path),
             headers={"Depth": "0", "Content-Type": "application/xml"},
         )
 
-        if resp.status_code == 404:
+        if resp is None:
+            return False, None
+        elif resp.status_code == 404:
             return False, None
         elif resp.status_code not in (207, 200):
             log.warning("PROPFIND %s -> %d", remote_path, resp.status_code)
@@ -83,16 +109,16 @@ class WebDAVClient:
                 '<d:propfind xmlns:d="DAV:"><d:prop>'
                 '<d:quota-available-bytes/><d:quota-used-bytes/>'
                 '</d:prop></d:propfind>')
-        try:
-            resp = self._session.request(
-                "PROPFIND", self._base_url + "/",
-                headers={"Depth": "0", "Content-Type": "application/xml"},
-                data=body,
-            )
-            
-            if resp.status_code not in (207, 200):
-                return None, None
+        resp = self._request(
+            "PROPFIND", self._base_url + "/",
+            headers={"Depth": "0", "Content-Type": "application/xml"},
+            data=body,
+        )
 
+        if resp is None or resp.status_code not in (207, 200):
+            return None, None
+
+        try:
             root = ET.fromstring(resp.text)
             ns = {"d": "DAV:"}
             avail_el = root.find(".//d:quota-available-bytes", ns)
@@ -101,11 +127,15 @@ class WebDAVClient:
             used = int(used_el.text) if used_el is not None and used_el.text else None
 
             return avail, used
-        except (requests.RequestException, ET.ParseError):
+        except ET.ParseError:
             return None, None
 
     def delete(self, remote_path: str) -> bool:
-        resp = self._session.request("DELETE", self._url(remote_path))
+        resp = self._request("DELETE", self._url(remote_path))
+
+        if resp is None:
+            return False
+
         return resp.status_code in (200, 204, 404)
 
     def upload(self, local_path: Path, remote_path: str) -> bool:

@@ -3,13 +3,14 @@
 import asyncio
 import csv
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 import zstandard as zstd
 
 import settings
-from maintain import compress_csv, extract_date, main
+from maintain import WebDAVClient, compress_csv, extract_date, main
 
 
 @pytest.fixture(autouse=True)
@@ -136,3 +137,80 @@ class TestCleanupBySize:
         assert z3.exists()
         assert not z1.exists()
         assert not z2.exists()
+
+
+class TestWebDAVClientNetworkResilience:
+    """Verify WebDAV methods degrade gracefully on requests.RequestException
+    instead of letting it propagate up and kill maintenance silently
+    (regression coverage for the 2026-04-14 outage)."""
+
+    def _client(self):
+        return WebDAVClient("https://example.com", "user", "pw")
+
+    def test_exists_returns_false_none_on_network_error(self):
+        client = self._client()
+        with patch.object(client._session, "request",
+                          side_effect=requests.ConnectionError("boom")):
+            assert client.exists("a/b/c.zst") == (False, None)
+
+    def test_ensure_dir_continues_on_network_error(self):
+        client = self._client()
+        with patch.object(client._session, "request",
+                          side_effect=requests.Timeout("timeout")):
+            client.ensure_dir("a/b/c")  # must not raise
+
+    def test_ensure_dir_does_not_cache_failed_dirs(self):
+        """A failed MKCOL should not poison the cache — next call retries."""
+        client = self._client()
+        with patch.object(client._session, "request",
+                          side_effect=requests.ConnectionError("boom")):
+            client.ensure_dir("a")
+
+        ok = MagicMock(status_code=201)
+        with patch.object(client._session, "request", return_value=ok) as m:
+            client.ensure_dir("a")
+            assert m.called  # retry happened
+
+    def test_delete_returns_false_on_network_error(self):
+        client = self._client()
+        with patch.object(client._session, "request",
+                          side_effect=requests.ConnectionError("boom")):
+            assert client.delete("a/b/c.zst") is False
+
+    def test_quota_returns_none_none_on_network_error(self):
+        client = self._client()
+        with patch.object(client._session, "request",
+                          side_effect=requests.ConnectionError("boom")):
+            assert client.quota() == (None, None)
+
+
+class TestMainSurvivesNetworkOutage:
+    """The whole point of the resilience changes: maintain.main() must
+    return without raising even when WebDAV is completely unreachable.
+    Compression still happens (local-only); upload+cleanup are skipped."""
+
+    def test_main_completes_when_webdav_unreachable(self, tmp_path, monkeypatch):
+        # Yesterday's CSV (today is skipped by phase 1).
+        _create_csv(tmp_path, "binance", "BTCUSDT", "1970-01-01")
+
+        original_request = requests.Session.request
+
+        def _flaky_request(self, method, url, **kwargs):
+            raise requests.ConnectionError("network down")
+
+        monkeypatch.setattr(requests.Session, "request", _flaky_request)
+        monkeypatch.setattr(settings, "LOCAL_STORAGE_MB", 100)
+        monkeypatch.setattr(settings, "WEBDAV2_URL", None)
+        monkeypatch.setattr(settings, "WEBDAV2_USER", None)
+        monkeypatch.setattr(settings, "WEBDAV2_PASSWORD", None)
+
+        # Must not raise. Returns 1 because every PROPFIND/upload counted
+        # as an error, but the run completed end-to-end.
+        exit_code = main()
+
+        assert exit_code == 1
+
+        # Local compression still happened (phase 1 doesn't touch network).
+        zst_files = list(tmp_path.rglob("*.csv.zst"))
+        assert len(zst_files) == 1
+        assert not list(tmp_path.rglob("*.csv"))

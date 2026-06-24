@@ -13,6 +13,9 @@ from writer import TickWriter
 
 log = logging.getLogger("collector")
 
+# Set in main(); used by _on_task_done to request a supervised restart.
+_shutdown_event: "asyncio.Event | None" = None
+
 
 async def _maintenance_loop() -> None:
     """Run maintenance daily at 00:01 UTC. Self-healing: exceptions
@@ -53,16 +56,23 @@ async def _gap_monitor(last_msg_mono: dict) -> None:
 
 
 def _on_task_done(task: asyncio.Task) -> None:
-    """Done-callback that surfaces unhandled task exceptions to the log
-    immediately. Without it, an exception in a fire-and-forget task is
-    only reported by asyncio at GC time as 'Task exception was never
-    retrieved' — which is easy to miss when journald is rotating."""
+    """Done-callback for the long-running tasks. A stream/writer/monitor is
+    meant to run forever, so if one ends here it is an unrecoverable partial
+    failure (e.g. one exchange silently dead). Log it and request a clean
+    shutdown so the systemd supervisor (Restart=always) restarts the whole
+    process fresh, instead of limping on degraded."""
     if task.cancelled():
         return
 
     exc = task.exception()
     if exc is not None:
         log.error("task %s died with exception", task.get_name(), exc_info=exc)
+    else:
+        log.error("task %s exited unexpectedly", task.get_name())
+
+    if _shutdown_event is not None and not _shutdown_event.is_set():
+        log.error("critical task ended -> shutting down for supervised restart")
+        _shutdown_event.set()
 
 
 async def main() -> None:
@@ -86,6 +96,8 @@ async def main() -> None:
 
     loop = asyncio.get_running_loop()
     shutdown_event = asyncio.Event()
+    global _shutdown_event
+    _shutdown_event = shutdown_event
 
     def _signal_handler():
         log.info("shutdown signal received")

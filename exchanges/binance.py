@@ -88,7 +88,7 @@ async def stream(
 
                 for tick in buf.values():
                     await queue.put(tick)
-        except (websockets.ConnectionClosed, ConnectionError, TimeoutError, OSError) as e:
+        except Exception as e:
             reconnect_count[EXCHANGE] = reconnect_count.get(EXCHANGE, 0) + 1
             log.warning("[binance] disconnected: %s; reconnect #%d in %ds", e, reconnect_count[EXCHANGE], backoff)
             await asyncio.sleep(backoff)

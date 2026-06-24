@@ -143,7 +143,7 @@ async def stream(queue: asyncio.Queue, last_state: dict, last_msg_mono: dict, re
                         await ping_task
                     except asyncio.CancelledError:
                         pass
-        except (websockets.ConnectionClosed, ConnectionError, TimeoutError, OSError) as e:
+        except Exception as e:
             reconnect_count[EXCHANGE] = reconnect_count.get(EXCHANGE, 0) + 1
             log.warning("[bybit] disconnected: %s; reconnect #%d in %ds", e, reconnect_count[EXCHANGE], backoff)
 

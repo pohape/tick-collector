@@ -56,22 +56,25 @@ WEBDAV_PASSWORD=your_app_password
 WEBDAV_URL=https://webdav.cloud.mail.ru  # or https://webdav.yandex.ru
 ```
 
-| Variable | Description |
-|---|---|
-| `DATA_DIR` | Directory for CSV files |
-| `BINANCE_SYMBOLS` | Comma-separated Binance symbols |
-| `BYBIT_SYMBOLS` | Comma-separated Bybit symbols |
-| `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING) |
-| `WS_TEST_MODE` | Disable TLS verification for toxiproxy testing |
-| `LOCAL_STORAGE_MB` | Max MB of compressed files to keep locally |
-| `WEBDAV_USER` | WebDAV account username |
-| `WEBDAV_PASSWORD` | WebDAV app password |
-| `WEBDAV_URL` | WebDAV endpoint URL |
-| `WEBDAV2_USER` | Secondary WebDAV username (optional) |
-| `WEBDAV2_PASSWORD` | Secondary WebDAV password (optional) |
-| `WEBDAV2_URL` | Secondary WebDAV URL (optional) |
+| Variable | Description | Required | Default |
+|---|---|---|---|
+| `DATA_DIR` | Directory for CSV files | yes | -- |
+| `BINANCE_SYMBOLS` | Comma-separated Binance symbols | yes | -- |
+| `BYBIT_SYMBOLS` | Comma-separated Bybit symbols | yes | -- |
+| `LOCAL_STORAGE_MB` | Max MB of compressed files to keep locally | yes | -- |
+| `WEBDAV_USER` | WebDAV account username | yes | -- |
+| `WEBDAV_PASSWORD` | WebDAV app password | yes | -- |
+| `WEBDAV_URL` | WebDAV endpoint URL | yes | -- |
+| `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING) | no | `INFO` |
+| `WS_TEST_MODE` | Disable TLS verification for toxiproxy testing | no | `false` |
+| `FLUSH_EVERY` | Flush the writer to disk every N rows | no | `500` |
+| `GAP_WARN_SECONDS` | Warn when a symbol has no update for this many seconds | no | `10` |
+| `WEBDAV2_USER` | Secondary WebDAV username | no | -- |
+| `WEBDAV2_PASSWORD` | Secondary WebDAV password | no | -- |
+| `WEBDAV2_URL` | Secondary WebDAV URL | no | -- |
 
-All variables are required except `WEBDAV2_*` which enable redundant backup.
+The seven `yes` variables must be set or the process exits at startup. The
+`WEBDAV2_*` trio is optional and enables redundant backup (see below).
 
 ## Data volume
 

@@ -266,7 +266,9 @@ Scenarios: connection drop, freeze, high latency, slow bandwidth, both exchanges
 
 ## Tests
 
+Test dependencies (`pytest`, `pytest-asyncio`) are included in `requirements.txt`,
+so a fresh venv can run the suite directly:
+
 ```bash
-./venv/bin/pip install pytest
 ./venv/bin/python3 -m pytest tests/ -v
 ```

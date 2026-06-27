@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from unittest.mock import patch
 
 import pytest
@@ -41,10 +42,14 @@ class TestMaintenanceLoopSelfHealing:
 
         task = asyncio.create_task(collector._maintenance_loop())
 
-        for _ in range(200):
-            await asyncio.sleep(0)
-            if call_count["n"] >= 2:
-                break
+        # Wait until the loop has crashed once and recovered (2nd call),
+        # bounded by a wall-clock deadline. A fixed spin-count is flaky:
+        # each maintain.main() runs in a real worker thread via
+        # asyncio.to_thread, so the number of event-loop yields needed is
+        # not deterministic.
+        deadline = time.monotonic() + 5.0
+        while call_count["n"] < 2 and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
 
         task.cancel()
         try:

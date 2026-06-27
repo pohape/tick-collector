@@ -123,7 +123,6 @@ def _check_one(label: str, url: str, user: str, password: str) -> bool:
 def _free_mb(url: str, user: str, password: str) -> int:
     dav = WebDAVClient(url, user, password)
     avail, _ = dav.quota()
-    avail, _ = dav.quota()
 
     if avail is None:
         print("error: connection failed", file=sys.stderr)

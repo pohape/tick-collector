@@ -19,10 +19,26 @@ def _csv_list(key: str) -> list[str]:
     return [s.strip() for s in _require(key).split(",") if s.strip()]
 
 
+def _csv_list_optional(key: str) -> list[str]:
+    return [s.strip() for s in os.getenv(key, "").split(",") if s.strip()]
+
+
 DATA_DIR = Path(_require("DATA_DIR"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-BINANCE_SYMBOLS = _csv_list("BINANCE_SYMBOLS")
-BYBIT_SYMBOLS = _csv_list("BYBIT_SYMBOLS")
+
+# Symbols are declared per asset class. Crypto trades 24/7; commodity perps
+# (metals/energy) follow markets that close on weekends. Each exchange's full
+# subscription list is crypto + commodity (commodity optional). COMMODITY_SYMBOLS
+# is the union, exported so the WebDAV sync check can relax its weekend
+# expectation for those symbols (see check_webdav.py).
+BINANCE_CRYPTO_SYMBOLS = _csv_list("BINANCE_CRYPTO_SYMBOLS")
+BINANCE_COMMODITY_SYMBOLS = _csv_list_optional("BINANCE_COMMODITY_SYMBOLS")
+BYBIT_CRYPTO_SYMBOLS = _csv_list("BYBIT_CRYPTO_SYMBOLS")
+BYBIT_COMMODITY_SYMBOLS = _csv_list_optional("BYBIT_COMMODITY_SYMBOLS")
+
+BINANCE_SYMBOLS = BINANCE_CRYPTO_SYMBOLS + BINANCE_COMMODITY_SYMBOLS
+BYBIT_SYMBOLS = BYBIT_CRYPTO_SYMBOLS + BYBIT_COMMODITY_SYMBOLS
+COMMODITY_SYMBOLS = set(BINANCE_COMMODITY_SYMBOLS) | set(BYBIT_COMMODITY_SYMBOLS)
 WS_TEST_MODE = os.getenv("WS_TEST_MODE", "false").lower() in ("true", "1", "yes")
 
 # Flush writer every N rows

@@ -59,8 +59,10 @@ WEBDAV_URL=https://webdav.cloud.mail.ru  # or https://webdav.yandex.ru
 | Variable | Description | Required | Default |
 |---|---|---|---|
 | `DATA_DIR` | Directory for CSV files | yes | -- |
-| `BINANCE_SYMBOLS` | Comma-separated Binance symbols | yes | -- |
-| `BYBIT_SYMBOLS` | Comma-separated Bybit symbols | yes | -- |
+| `BINANCE_CRYPTO_SYMBOLS` | Comma-separated Binance crypto symbols (24/7) | yes | -- |
+| `BYBIT_CRYPTO_SYMBOLS` | Comma-separated Bybit crypto symbols (24/7) | yes | -- |
+| `BINANCE_COMMODITY_SYMBOLS` | Binance commodity symbols (~5 days/week; weekend sync-exempt) | no | -- |
+| `BYBIT_COMMODITY_SYMBOLS` | Bybit commodity symbols (~5 days/week; weekend sync-exempt) | no | -- |
 | `LOCAL_STORAGE_MB` | Max MB of compressed files to keep locally | yes | -- |
 | `WEBDAV_USER` | WebDAV account username | yes | -- |
 | `WEBDAV_PASSWORD` | WebDAV app password | yes | -- |

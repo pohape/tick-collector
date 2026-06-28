@@ -18,15 +18,15 @@ CROSS = f"{RED}\u2718{RESET}"
 
 # Commodity (metals/energy) perps track underlying markets that close on
 # weekends, so their top-of-book price barely moves and buffered dedup writes
-# little or nothing. On Sat/Sun (UTC) we therefore don't require their files.
+# little or nothing. On Sat/Sun (UTC) we therefore don't require their files
+# (the commodity set comes from settings, declared per asset class in .env).
 # Crypto (24/7) and weekday commodity files are still checked strictly, so a
 # genuinely dead stream on a trading day still trips the check.
-COMMODITY_SYMBOLS = {"XAUUSDT", "XAGUSDT", "CLUSDT"}
 MIN_SYNCED_BYTES = 1024
 
 
 def _data_synced(dav, exchange: str, symbol: str, date_str: str, is_weekend: bool) -> bool:
-    if symbol in COMMODITY_SYMBOLS and is_weekend:
+    if symbol in settings.COMMODITY_SYMBOLS and is_weekend:
         return True
 
     exists, size = dav.exists(f"{CLOUD_ROOT}/{exchange}/{symbol}/{date_str}.csv.zst")

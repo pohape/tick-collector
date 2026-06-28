@@ -16,6 +16,23 @@ RESET = "\033[0m"
 CHECK = f"{GREEN}\u2714{RESET}"
 CROSS = f"{RED}\u2718{RESET}"
 
+# Commodity (metals/energy) perps track underlying markets that close on
+# weekends, so their top-of-book price barely moves and buffered dedup writes
+# little or nothing. On Sat/Sun (UTC) we therefore don't require their files.
+# Crypto (24/7) and weekday commodity files are still checked strictly, so a
+# genuinely dead stream on a trading day still trips the check.
+COMMODITY_SYMBOLS = {"XAUUSDT", "XAGUSDT", "CLUSDT"}
+MIN_SYNCED_BYTES = 1024
+
+
+def _data_synced(dav, exchange: str, symbol: str, date_str: str, is_weekend: bool) -> bool:
+    if symbol in COMMODITY_SYMBOLS and is_weekend:
+        return True
+
+    exists, size = dav.exists(f"{CLOUD_ROOT}/{exchange}/{symbol}/{date_str}.csv.zst")
+
+    return exists and bool(size) and size >= MIN_SYNCED_BYTES
+
 
 def _ok(msg: str) -> None:
     print(f"  {CHECK} {msg}")
@@ -92,23 +109,21 @@ def _check_one(label: str, url: str, user: str, password: str) -> bool:
         return False
 
     # Sync check: verify yesterday's data exists in cloud
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
-    expected = []
+    yday = datetime.now(timezone.utc) - timedelta(days=1)
+    yesterday = yday.strftime("%Y-%m-%d")
+    is_weekend = yday.weekday() >= 5
 
-    for symbols, exchange in [(settings.BINANCE_SYMBOLS, "binance"), (settings.BYBIT_SYMBOLS, "bybit")]:
-        for symbol in symbols:
-            expected.append(f"{CLOUD_ROOT}/{exchange}/{symbol}/{yesterday}.csv.zst")
-
-    def _missing(r):
-        exists, size = dav.exists(r)
-        return not exists or not size or size < 1024
-
-    missing = [r for r in expected if _missing(r)]
+    pairs = [(exchange, symbol)
+             for symbols, exchange in [(settings.BINANCE_SYMBOLS, "binance"), (settings.BYBIT_SYMBOLS, "bybit")]
+             for symbol in symbols]
+    missing = [f"{CLOUD_ROOT}/{exchange}/{symbol}/{yesterday}.csv.zst"
+               for exchange, symbol in pairs
+               if not _data_synced(dav, exchange, symbol, yesterday, is_weekend)]
 
     if not missing:
-        _ok(f"Synced: all {len(expected)} files for {yesterday}")
+        _ok(f"Synced: all {len(pairs)} files for {yesterday}")
     else:
-        _fail(f"Missing {len(missing)}/{len(expected)} files for {yesterday}:")
+        _fail(f"Missing {len(missing)}/{len(pairs)} files for {yesterday}:")
 
         for m in missing:
             print(f"         {m}")
@@ -132,14 +147,14 @@ def _free_mb(url: str, user: str, password: str) -> int:
 
 
 def _is_synced(url: str, user: str, password: str) -> bool:
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    yday = datetime.now(timezone.utc) - timedelta(days=1)
+    yesterday = yday.strftime("%Y-%m-%d")
+    is_weekend = yday.weekday() >= 5
     dav = WebDAVClient(url, user, password)
 
     for symbols, exchange in [(settings.BINANCE_SYMBOLS, "binance"), (settings.BYBIT_SYMBOLS, "bybit")]:
         for symbol in symbols:
-            exists, size = dav.exists(f"{CLOUD_ROOT}/{exchange}/{symbol}/{yesterday}.csv.zst")
-
-            if not exists or not size or size < 1024:
+            if not _data_synced(dav, exchange, symbol, yesterday, is_weekend):
                 return False
     return True
 
